@@ -1,5 +1,3 @@
-# Sure, here's an example README.md file for the ShadowCaller tool:
-
 # ShadowCaller
 
 ShadowCaller is a phone number details finder tool with social media finding and other features. It allows you to look up information about phone numbers, including the country, region, carrier, and line type, as well as any associated social media profiles and other online activity.
