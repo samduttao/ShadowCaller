@@ -19,7 +19,7 @@ To use ShadowCaller, you'll need to have Python 3.x installed on your system. Yo
 Once you have Python installed, you can clone the ShadowCaller repository and install the required dependencies using the following commands:
 
 ```
-git clone https://github.com/your-username/ShadowCaller.git
+git clone https://github.com/samduttao/ShadowCaller.git
 cd ShadowCaller
 pip install -r requirements.txt
 ```
