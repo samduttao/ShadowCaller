@@ -1,117 +1,99 @@
 import phonenumbers
 import requests
+import argparse
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-import sys
-
 
 def validate_phone_number(phone_number):
     """
-    Validate the given phone number and return it in E.164 format.
+    Validates the given phone number and returns a parsed object if valid.
     """
     try:
-        parsed_number = phonenumbers.parse(phone_number, None)
-    except phonenumbers.NumberParseException:
-        print(f"Invalid phone number: {phone_number}")
-        sys.exit(1)
-
+        parsed_number = phonenumbers.parse(phone_number)
+    except phonenumbers.phonenumberutil.NumberParseException:
+        return None
+    
+    if not phonenumbers.is_possible_number(parsed_number):
+        return None
+    
     if not phonenumbers.is_valid_number(parsed_number):
-        print(f"Invalid phone number: {phone_number}")
-        sys.exit(1)
+        return None
+    
+    return parsed_number
 
-    return phonenumbers.format_number(parsed_number, phonenumbers.PhoneNumberFormat.E164)
-
-
-def lookup_phone_number(phone_number):
+def lookup_phone_number(parsed_number):
     """
-    Lookup information about the given phone number using web APIs.
+    Looks up information about the given phone number using various APIs.
     """
-    url = f"https://www.truecaller.com/search/in/{phone_number}"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"}
+    response = requests.get(f"https://api.telnyx.com/anonymous/v2/number_lookup/{parsed_number.country_code}{parsed_number.national_number}")
+    if response.status_code != 200:
+        return None
+    
+    data = response.json()
+    carrier = data.get("carrier", {}).get("name", None)
+    line_type = data.get("line_type", None)
+    
+    return {
+        "country": phonenumbers.region_code_for_number(parsed_number),
+        "region": phonenumbers.geocoder.description_for_number(parsed_number, "en"),
+        "carrier": carrier,
+        "line_type": line_type,
+    }
 
-    # Use a session to persist cookies across requests
-    with requests.Session() as session:
-        # Load the initial page to get the session cookie
-        session.get(url, headers=headers)
-
-        # Make a POST request to the API to get phone number details
-        api_url = "https://www.truecaller.com/v2/search"
-        response = session.post(api_url, json={"search": f"{phone_number}"})
-
-        if response.status_code != 200:
-            print(f"Error: HTTP {response.status_code}")
-            sys.exit(1)
-
-        # Parse the JSON response and extract the relevant fields
-        result = response.json()["data"][0]
-        name = result.get("name")
-        location = result.get("location")
-        carrier = result.get("carrier")
-        line_type = result.get("line_type")
-
-        # Return the phone number details as a dictionary
-        return {
-            "name": name,
-            "location": location,
-            "carrier": carrier,
-            "line_type": line_type
-        }
-
-
-def lookup_social_media(phone_number):
+def search_social_media(phone_number):
     """
-    Lookup social media profiles and activity associated with the given phone number using web scraping.
+    Searches for social media profiles and activity associated with the given phone number.
     """
-    url = f"https://www.google.com/search?q={phone_number}"
     options = Options()
-    options.headless = True
+    options.add_argument("--headless")
     driver = webdriver.Chrome(options=options)
-
-    # Load the Google search results page and extract the URLs
-    driver.get(url)
-    soup = BeautifulSoup(driver.page_source, "html.parser")
-    links = soup.find_all("a")
-    urls = [link.get("href") for link in links]
-
-    # Filter the URLs to those that are likely to be social media profiles
-    social_media_urls = []
-    for url in urls:
-        if "facebook.com" in url:
-            social_media_urls.append(url)
-        elif "twitter.com" in url:
-            social_media_urls.append(url)
-        elif "instagram.com" in url:
-            social_media_urls.append(url)
-
-    # Visit each social media profile and extract activity data
-    activity = {}
-    for url in social_media_urls:
-        driver.get(url)
+    
+    try:
+        driver.get("https://www.google.com/")
+        search_box = driver.find_element_by_name("q")
+        search_box.send_keys(f'"{phone_number}"')
+        search_box.submit()
+        
         soup = BeautifulSoup(driver.page_source, "html.parser")
+        results = soup.find_all("div", class_="g")
+        
+        for result in results:
+            link = result.find("a")
+            if not link:
+                continue
+            
+            href = link.get("href")
+            if "twitter.com" in href:
+                print(f"Twitter: {href}")
+            elif "facebook.com" in href:
+                print(f"Facebook: {href}")
+            elif "linkedin.com" in href:
+                print(f"LinkedIn: {href}")
+                
+    finally:
+        driver.quit()
 
-        if "facebook.com" in url:
-            # Extract Facebook activity data
-            likes = soup.find("div", {"class": "_4-u2 _6590 _3xaf _4-u8"})
-            if likes is not None:
-                likes = likes.text.strip
-        elif "twitter.com" in url:
-            # Extract Twitter activity data
-            tweets = soup.find_all("div", {"class": "css-901oao css-bfa6kz r-111h2gw r-18u37iz r-1qd0xha r-a023e6 r-16dba41 r-ad9z0x r-bcqeeo r-13qz1uu r-qvutc0"})
-            if tweets:
-                tweets_count = len(tweets)
-                activity["twitter"] = {"tweets": tweets_count}
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="A tool to find social media profiles associated with a phone number.")
+    parser.add_argument("phone_number", type=str, help="The phone number to look up (in international format, e.g. +14155552671)")
+    args = parser.parse_args()
 
-        elif "instagram.com" in url:
-            # Extract Instagram activity data
-            posts = soup.find("span", {"class": "g47SY"})
-            if posts is not None:
-                posts_count = posts.text.replace(",", "")
-                activity["instagram"] = {"posts": posts_count}
+    parsed_number = validate_phone_number(args.phone_number)
+    if not parsed_number:
+        print("Invalid phone number")
+        exit(1)
 
-    # Quit the browser driver
-    driver.quit()
+    phone_info = lookup_phone_number(parsed_number)
+    if not phone_info:
+        print("Could not look up phone number")
+        exit(1)
 
-    # Return the social media activity data as a dictionary
-    return activity
+    print("Phone number information:")
+    print(f"Country: {phone_info['country']}")
+    print(f"Region: {phone_info['region']}")
+    print(f"Carrier: {phone_info['carrier']}")
+    print(f"Line type: {phone_info['line_type']}")
+
+    print("Social media information:")
+    search_social_media(args.phone_number)
